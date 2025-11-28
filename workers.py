@@ -1,8 +1,6 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 from llm_client import LLMClient
 from search_tool import SearchTool
-import json
-import re
 
 class SearchWorker(QThread):
     """【新增】独立的搜索线程，防止界面卡死"""
@@ -80,7 +78,8 @@ class ArenaWorker(QThread):
 
 class JudgeWorker(QThread):
     """裁判线程"""
-    result_signal = pyqtSignal(dict) 
+    # 【修改点 1】信号类型改为 str，直接传输文本，不再传输字典
+    result_signal = pyqtSignal(str) 
 
     def __init__(self, api_key, judge_model, judge_system_prompt, user_prompt, model_results):
         super().__init__()
@@ -89,14 +88,14 @@ class JudgeWorker(QThread):
         self.judge_system_prompt = judge_system_prompt
         self.user_prompt = user_prompt
         self.model_results = model_results
-        self.judge_params = {"temperature": 0.2, "max_tokens": 2048}
+        self.judge_params = {"temperature": 0.2, "max_tokens": 4096} # 稍微调大token，因为不再是紧凑的json
         self._is_cancelled = False
 
     def run(self):
         if self._is_cancelled: return
 
         contestant_text = ""
-        # 【优化】防止上下文爆炸：限制每个模型回答的长度（例如只取前 6000 字符）
+        # 限制长度防止上下文爆炸
         MAX_CHAR_PER_MODEL = 6000 
         
         for name, text in self.model_results.items():
@@ -108,21 +107,14 @@ class JudgeWorker(QThread):
 
         final_user_content = (
             f"用户原始问题：\n{self.user_prompt}\n\n"
-            f"以下是各参赛模型的回答，请根据 System Prompt 的要求进行评审和融合：\n"
+            f"以下是各参赛模型的回答，请根据 System Prompt 的要求进行评审、对比优缺点，并给出一个最佳的融合答案：\n"
             f"{contestant_text}"
         )
 
-        json_instruction = (
-            "\n\n请严格输出合法的 JSON 格式，不要使用 Markdown 代码块包裹，格式如下：\n"
-            "{\n"
-            '  "reviews": [{"model": "模型名", "score": 9.5, "comment": "评价..."}],\n'
-            '  "best_model": "最高分模型名",\n'
-            '  "fusion_result": "最终融合后的完善答案..."\n'
-            "}"
-        )
-
+        # 【修改点 2】删除了 json_instruction 变量，不再强制 JSON 格式
+        
         messages = [
-            {"role": "system", "content": self.judge_system_prompt + json_instruction},
+            {"role": "system", "content": self.judge_system_prompt},
             {"role": "user", "content": final_user_content}
         ]
 
@@ -140,37 +132,15 @@ class JudgeWorker(QThread):
         
         if self._is_cancelled: return
 
-        raw_content = response.get("content", "{}")
-        
-        # 【优化】更鲁棒的 JSON 提取逻辑
-        parsed_json = self.extract_json(raw_content)
-        if parsed_json:
-            self.result_signal.emit(parsed_json)
+        # 【修改点 3】不再解析 JSON，直接获取 content 文本
+        if "error" in response:
+            error_msg = f"裁判模型调用出错: {response['error']}"
+            self.result_signal.emit(error_msg)
         else:
-            fallback = {
-                "error": "裁判输出无法解析为 JSON",
-                "raw_output": raw_content
-            }
-            self.result_signal.emit(fallback)
+            raw_content = response.get("content", "[裁判未返回任何内容]")
+            self.result_signal.emit(raw_content)
 
-    def extract_json(self, text):
-        """使用正则尝试提取 JSON"""
-        try:
-            # 1. 尝试直接解析
-            return json.loads(text)
-        except:
-            pass
-        
-        try:
-            # 2. 正则提取最外层 {}
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if match:
-                json_str = match.group()
-                return json.loads(json_str)
-        except:
-            pass
-            
-        return None
+    # extract_json 方法已删除
 
     def stop(self):
         self._is_cancelled = True

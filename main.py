@@ -17,10 +17,10 @@ from workers import ArenaWorker, JudgeWorker, SearchWorker
 
 AVAILABLE_MODELS = [
     "deepseek-ai/DeepSeek-R1",
+    "Pro/moonshotai/Kimi-K2-Thinking",
     "deepseek-ai/DeepSeek-V3",
     "Qwen/Qwen2.5-72B-Instruct",
     "Qwen/Qwen3-VL-32B-Thinking",
-    "Pro/moonshotai/Kimi-K2-Thinking",
     "deepseek-ai/deepseek-vl2"
 ]
 
@@ -44,8 +44,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         self.setWindowTitle("【模型开会】 作者公众号：叶草凡的日记本 邮箱：yp.work@foxmail.com")
         
-        # --- 【修改点 1】设置窗口图标 ---
-        # 尝试加载同目录下的 icon.ico
+        # --- 设置窗口图标 ---
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
         else:
@@ -90,7 +89,7 @@ class MainWindow(QMainWindow):
         self.api_key_combo.currentIndexChanged.connect(self.on_api_key_changed)
         key_layout.addWidget(self.api_key_combo)
         btn_add_key = QToolButton()
-        btn_add_key.setText("增") #稍微美化了一下符号
+        btn_add_key.setText("增") 
         btn_add_key.setToolTip("添加新的 API Key")
         btn_add_key.clicked.connect(self.add_api_key_action)
         key_layout.addWidget(btn_add_key)
@@ -155,19 +154,18 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(QLabel("裁判模型:"))
         self.judge_selector = QComboBox()
         
-        # --- 【修改点 2】添加“不启用裁判”选项 ---
+        # 添加“不启用裁判”选项
         self.judge_selector.addItem("🚫 不启用裁判 (Skip Judge)", None) 
         
         for model in AVAILABLE_MODELS:
             self.judge_selector.addItem(model.split("/")[-1], model)
             
-        # 默认选中列表中的第一个真实模型（索引为1），如果想默认不启用，设为 0
+        # 默认选中列表中的第一个真实模型（索引为1）
         self.judge_selector.setCurrentIndex(1) 
         
         header_layout.addWidget(self.judge_selector)
         
         self.btn_judge_gear = QToolButton(); self.btn_judge_gear.setText("⚙")
-        # 注意：这里加了个检查，防止对 None 调用配置
         self.btn_judge_gear.clicked.connect(lambda: self.open_param_dialog(self.judge_selector.currentData(), is_judge=True) if self.judge_selector.currentData() else None)
         header_layout.addWidget(self.btn_judge_gear)
         right_layout.addLayout(header_layout)
@@ -180,7 +178,8 @@ class MainWindow(QMainWindow):
         j_layout = QVBoxLayout(judge_frame); j_layout.setContentsMargins(0,0,0,0)
         j_layout.addWidget(QLabel("<b>裁判指令 (System Prompt):</b>"))
         self.judge_input = QTextEdit()
-        self.judge_input.setPlainText("你是一个公正的AI裁判。请对比各模型回答，指出优缺点，并整合生成一个最完美的答案。")
+        # 【修改】更新默认 Prompt，不再强制 JSON，让裁判自然发挥
+        self.judge_input.setPlainText("你是一个公正的AI裁判。请对比各模型回答，详细指出它们的优缺点，最后整合生成一个最完美的答案。")
         self.judge_input.setMaximumHeight(80)
         j_layout.addWidget(self.judge_input)
         input_split.addWidget(judge_frame)
@@ -255,13 +254,15 @@ class MainWindow(QMainWindow):
         right_layout.addLayout(ctrl_layout)
 
         # 4. 结果展示
+        # 【修改】删除了 tab_fusion，只保留裁判分析和原始回答
         self.result_tabs = QTabWidget()
-        self.tab_fusion = QTextEdit(); self.tab_fusion.setReadOnly(True)
-        self.result_tabs.addTab(self.tab_fusion, "🏆 融合结果")
+        
         self.tab_verdict = QTextEdit(); self.tab_verdict.setReadOnly(True)
-        self.result_tabs.addTab(self.tab_verdict, "⚖️ 裁判分析")
+        self.result_tabs.addTab(self.tab_verdict, "⚖️ 裁判分析") # Index 0
+        
         self.tab_raw = QTextEdit(); self.tab_raw.setReadOnly(True)
-        self.result_tabs.addTab(self.tab_raw, "📝 原始回答")
+        self.result_tabs.addTab(self.tab_raw, "📝 原始回答") # Index 1
+        
         right_layout.addWidget(self.result_tabs)
 
         right_panel.setLayout(right_layout)
@@ -269,8 +270,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left_panel); splitter.addWidget(right_panel)
         splitter.setSizes([280, 920])
         self.setCentralWidget(splitter)
+
     # --- 逻辑部分 ---
-    # --- 新增的 API Key 管理逻辑 (请补全这部分) ---
 
     def mask_key(self, key):
         """脱敏显示 Key"""
@@ -282,17 +283,14 @@ class MainWindow(QMainWindow):
         self.api_key_combo.blockSignals(True)
         self.api_key_combo.clear()
         
-        # 注意：这里需要 config_manager.py 也已经更新支持 get_api_keys
         if hasattr(self.cfg_mgr, 'get_api_keys'):
             keys = self.cfg_mgr.get_api_keys()
         else:
             keys = []
             
         for k in keys:
-            # 文本显示脱敏版，User Data 存真实版
             self.api_key_combo.addItem(self.mask_key(k), k)
             
-        # 恢复上次选中的索引
         if hasattr(self.cfg_mgr, 'get_current_key_index'):
             saved_idx = self.cfg_mgr.get_current_key_index()
             if saved_idx < self.api_key_combo.count():
@@ -306,11 +304,9 @@ class MainWindow(QMainWindow):
         text, ok = QInputDialog.getText(self, "添加 API Key", "请输入 SiliconFlow API Key (sk-...):")
         if ok and text.strip():
             key = text.strip()
-            # 确保 config_manager.py 已实现 add_api_key
             if hasattr(self.cfg_mgr, 'add_api_key'):
                 self.cfg_mgr.add_api_key(key)
                 self.refresh_api_key_list()
-                # 自动选中刚添加的
                 self.api_key_combo.setCurrentIndex(self.api_key_combo.count() - 1)
             else:
                 QMessageBox.critical(self, "错误", "ConfigManager 尚未更新，无法添加 Key。")
@@ -332,7 +328,6 @@ class MainWindow(QMainWindow):
             self.cfg_mgr.set_current_key_index(index)
 
     def start_arena(self):
-        # 修改：不再从 LineEdit 获取，而是从 ComboBox 的 Data 获取
         api_key = self.api_key_combo.currentData() 
         if not api_key:
             QMessageBox.warning(self, "错误", "请先添加并选择一个有效的 API Key！")
@@ -354,7 +349,8 @@ class MainWindow(QMainWindow):
             return
 
         self.set_ui_busy(True)
-        self.tab_raw.clear(); self.tab_fusion.clear(); self.tab_verdict.clear()
+        # 【修改】只清理剩下的两个 Tab
+        self.tab_raw.clear(); self.tab_verdict.clear()
         
         if self.btn_search.isChecked():
             self.start_search_phase(user_prompt)
@@ -386,12 +382,11 @@ class MainWindow(QMainWindow):
         
         vision_models = self.cfg_mgr.get_vision_models()
         
-        # 修改：获取当前的 API Key
         current_api_key = self.api_key_combo.currentData()
 
         for model_conf in self.selected_workers_data:
             worker = ArenaWorker(
-                current_api_key, # 传入 Key
+                current_api_key, 
                 model_conf, 
                 final_prompt, 
                 file_paths=self.uploaded_files,
@@ -411,23 +406,21 @@ class MainWindow(QMainWindow):
             self.start_judge_phase()
 
     def start_judge_phase(self):
-        # 修改：获取当前的 API Key
         current_api_key = self.api_key_combo.currentData()
         judge_model = self.judge_selector.currentData()
 
-        # --- 【修改点 3】如果不启用裁判，直接结束 ---
         if not judge_model:
             self.set_ui_busy(False)
             self.progress_bar.setValue(self.total_contestants + 1)
-            self.tab_fusion.setPlainText("[裁判未启用]\n仅展示各模型的原始回答，请切换到“原始回答”标签页查看。")
-            self.tab_verdict.setPlainText("[裁判未启用]")
-            self.result_tabs.setCurrentIndex(2) # 自动跳转到原始回答页
+            # 【修改】使用 tab_verdict 显示提示，并跳转到 tab_raw (index 1)
+            self.tab_verdict.setPlainText("[裁判未启用]\n仅展示各模型的原始回答，请切换到“原始回答”标签页查看。")
+            self.result_tabs.setCurrentIndex(1) 
             return
             
         self.start_btn.setText("裁判思考中...")
         
         judge_worker = JudgeWorker(
-            current_api_key, # 传入 Key
+            current_api_key, 
             judge_model,
             self.judge_input.toPlainText(),
             self.user_input.toPlainText(),
@@ -437,21 +430,15 @@ class MainWindow(QMainWindow):
         self.active_workers.append(judge_worker)
         judge_worker.start()
 
-    def on_judge_finish(self, result_json):
+    def on_judge_finish(self, result_text):
+        """【修改】直接接收字符串文本，不再处理 JSON"""
         self.set_ui_busy(False)
         self.progress_bar.setValue(self.total_contestants + 1)
         
-        if "error" in result_json:
-            self.tab_fusion.setPlainText(f"裁判出错: {result_json['error']}\n{result_json.get('raw_output')}")
-            return
-
-        self.tab_fusion.setPlainText(f"最佳模型: {result_json.get('best_model')}\n\n{result_json.get('fusion_result')}")
+        # 直接显示裁判返回的文本
+        self.tab_verdict.setPlainText(result_text)
         
-        reviews = result_json.get("reviews", [])
-        v_text = ""
-        for r in reviews:
-            v_text += f"模型: {r.get('model')}\n评分: {r.get('score')}\n点评: {r.get('comment')}\n----------------\n"
-        self.tab_verdict.setPlainText(v_text)
+        # 自动切换到裁判分析页 (index 0)
         self.result_tabs.setCurrentIndex(0)
 
     def stop_arena(self):
@@ -465,7 +452,7 @@ class MainWindow(QMainWindow):
         
         self.active_workers.clear()
         self.set_ui_busy(False)
-        self.tab_fusion.append("\n[用户已中止进程]")
+        self.tab_raw.append("\n[用户已中止进程]")
 
     def set_ui_busy(self, busy):
         self.start_btn.setEnabled(not busy)
@@ -487,7 +474,6 @@ class MainWindow(QMainWindow):
         if fnames:
             for f in fnames:
                 if f not in self.uploaded_files:
-                    # 再次进行简单的后缀名防呆检查（可选，防止用户选All Files强行传PDF）
                     ext = os.path.splitext(f)[1].lower()
                     if ext in ['.pdf', '.pptx', '.ppt', '.xlsx', '.xls']:
                         QMessageBox.warning(self, "格式不支持", f"已停止支持 {ext} 格式，请仅上传 .docx、图片或纯文本。")
@@ -573,18 +559,18 @@ class MainWindow(QMainWindow):
         if c: self.user_input.setPlainText(c)
 
     def export_results(self):
-        txt = self.tab_fusion.toPlainText()
+        # 【修改】导出逻辑更新，去除 fusion
+        txt = self.tab_verdict.toPlainText()
         if not txt: return
         now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(os.getcwd(), f"Arena_Result_{now}.txt")
         try:
             with open(path, 'w', encoding='utf-8') as f:
-                f.write(f"问题: {self.user_input.toPlainText()}\n\n=== 融合结果 ===\n{txt}\n\n=== 裁判 ===\n{self.tab_verdict.toPlainText()}\n\n=== 原始 ===\n{self.tab_raw.toPlainText()}")
+                f.write(f"问题: {self.user_input.toPlainText()}\n\n=== 裁判分析与结论 ===\n{txt}\n\n=== 原始模型回答 ===\n{self.tab_raw.toPlainText()}")
             QDesktopServices.openUrl(QUrl.fromLocalFile(os.getcwd()))
         except Exception as e:
             QMessageBox.critical(self, "错误", f"导出失败: {e}")
 
-    # --- 【关键修复】恢复完整的状态保存与加载逻辑 ---
     def restore_state(self):
         state = self.cfg_mgr.get_window_state()
         self.setGeometry(state["x"], state["y"], state["width"], state["height"])
@@ -593,26 +579,21 @@ class MainWindow(QMainWindow):
         last = self.cfg_mgr.get_last_session()
         if not last: return
 
-        # 恢复各个输入框
         if "judge_prompt" in last: self.judge_input.setPlainText(last["judge_prompt"])
         if "user_prompt" in last: self.user_input.setPlainText(last["user_prompt"])
         
-        # 恢复裁判选择
         if "judge_model" in last:
             idx = self.judge_selector.findData(last["judge_model"])
             if idx >= 0: self.judge_selector.setCurrentIndex(idx)
         
-        # 恢复参数
         if "judge_params" in last: self.judge_params = last["judge_params"]
         if "model_params_map" in last: self.model_params_map = last["model_params_map"]
             
-        # 恢复模型勾选状态
         saved_selected = last.get("selected_models", [])
         for cb in self.model_checkboxes:
             full_name = cb.property("full_name")
             cb.setChecked(full_name in saved_selected)
         
-        # 恢复搜索设置
         if "search_enabled" in last:
             self.btn_search.setChecked(last["search_enabled"])
         if "search_max_results" in last:
@@ -622,7 +603,6 @@ class MainWindow(QMainWindow):
         geo = self.geometry()
         self.cfg_mgr.set_window_state(geo.x(), geo.y(), geo.width(), geo.height())
         
-        # 【关键修复】保存完整状态
         selected_models_list = []
         for cb in self.model_checkboxes:
             if cb.isChecked():
@@ -679,7 +659,7 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
-    # --- 【修改点 4】设置应用程序级别的图标（用于任务栏） ---
+    # 设置应用程序级别的图标
     if getattr(sys, 'frozen', False):
         base_dir = os.path.dirname(sys.executable)
     else:

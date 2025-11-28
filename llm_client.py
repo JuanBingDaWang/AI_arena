@@ -3,6 +3,8 @@ import json
 import base64
 import os
 import mimetypes
+import time  # 【新增】用于重试延迟
+from requests.exceptions import RequestException, Timeout, ConnectionError # 【新增】捕获异常
 
 # 仅尝试导入 docx 解析库，移除 pypdf, pandas, pptx
 try:
@@ -97,7 +99,6 @@ class LLMClient:
                     text_attachments.append(f"\n\n[附件文档: {fname}]:\n{parsed_text}")
                 
                 # C. 纯文本处理 (代码、TXT、Markdown等)
-                # 排除掉二进制文件防止乱码，但这里简单通过后缀判断或者 try-read
                 else: 
                     # 尝试以 UTF-8 读取
                     try:
@@ -148,15 +149,39 @@ class LLMClient:
                 else:
                     payload[key] = value
 
-        try:
-            response = requests.post(LLMClient.BASE_URL, headers=headers, json=payload, timeout=120)
-            if response.status_code == 200:
-                data = response.json()
-                if 'choices' in data and len(data['choices']) > 0:
-                    return {"content": data['choices'][0]['message']['content']}
+        # 【修改重点】增加重试机制和延长超时时间
+        MAX_RETRIES = 2  # 最大重试次数
+        TIMEOUT_SECONDS = 300  # 超时时间设置为 300秒 (5分钟)
+
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                # 尝试发送请求
+                response = requests.post(LLMClient.BASE_URL, headers=headers, json=payload, timeout=TIMEOUT_SECONDS)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'choices' in data and len(data['choices']) > 0:
+                        return {"content": data['choices'][0]['message']['content']}
+                    else:
+                        return {"error": f"API 结构异常: {data}"}
                 else:
-                    return {"error": f"API 结构异常: {data}"}
-            else:
-                return {"error": f"API Error {response.status_code}: {response.text}"}
-        except Exception as e:
-            return {"error": f"请求异常: {str(e)}"}
+                    # 如果是 5xx 服务端错误，可以重试；如果是 4xx 客户端错误，直接返回
+                    if 500 <= response.status_code < 600:
+                        if attempt < MAX_RETRIES:
+                            time.sleep(2) # 歇两秒再试
+                            continue
+                    return {"error": f"API Error {response.status_code}: {response.text}"}
+
+            except (Timeout, ConnectionError) as e:
+                # 捕获超时或连接错误
+                print(f"Request failed (Attempt {attempt+1}/{MAX_RETRIES + 1}): {e}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(3) # 遇到网络问题，多歇一会
+                    continue
+                else:
+                    return {"error": f"请求超时或网络连接失败 (已尝试{MAX_RETRIES+1}次): {str(e)}"}
+            except RequestException as e:
+                # 其他请求异常
+                return {"error": f"请求异常: {str(e)}"}
+            except Exception as e:
+                return {"error": f"未知异常: {str(e)}"}
